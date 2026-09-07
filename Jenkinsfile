@@ -109,7 +109,7 @@ pipeline {
         stage('SAST & SCA') {
             parallel {
                 stage('SAST - SonarQube') {
-                    when { expression { !params.SKIP_SONARQUBE } }
+                    when { expression { !params.SKIP_SONAR && !params.SKIP_SONARQUBE } }
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                             script {
@@ -176,8 +176,7 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Quality Gate') {
             when {
-                expression { !params.SKIP_SONAR }
-             }
+                expression { !params.SKIP_SONAR && !params.SKIP_SONARQUBE }
             }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
@@ -332,14 +331,11 @@ pipeline {
         //       traceability and rollback capability.
         // ═══════════════════════════════════════════════════════════
         stage('Publish JAR to Nexus') {
-             when {
-                 allOf {
-                    branch 'main'
-                    expression {
+            when {
+                expression {
                     params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production'
-                    }
-                 }
-           }
+                }
+            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
@@ -372,14 +368,11 @@ XMLEOF
         //       deployments always pull from a trusted source.
         // ═══════════════════════════════════════════════════════════
         stage('Push Docker Image to Nexus') {
-             when {
-                   allOf {
-                   branch 'main'
-                   expression {
-                       params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production'
-                     }
+            when {
+                expression {
+                    params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production'
                 }
-         } 
+            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
