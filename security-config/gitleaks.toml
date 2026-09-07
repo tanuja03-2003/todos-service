@@ -12,6 +12,9 @@ paths = [
     '''\.gradle''',
     '''target/''',
 ]
+commits = [
+    "a1c9286ff9e1ab0b34f63099615c5d5cdbe84ace",
+]
 
 [[rules]]
 id = "custom-api-key"
