@@ -169,10 +169,10 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Package JAR & Build Docker Image') {
             steps {
-                dir('todos-service') {
+                
                     sh "./mvnw clean ${params.SKIP_TESTS ? 'compile' : 'verify'} -B"
                     sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest ."
-                }
+                
             }
         }
 
