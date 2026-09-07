@@ -145,7 +145,10 @@ pipeline {
                 stage('SCA - OWASP Dependency-Check') {
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                            sh './mvnw org.owasp:dependency-check-maven:check -DdataDirectory=/opt/dependency-check-data -B'
+                            sh '''
+                                mkdir -p "${WORKSPACE}/.dependency-check-cache"
+                                ./mvnw org.owasp:dependency-check-maven:check -DdataDirectory="${WORKSPACE}/.dependency-check-cache" -B
+                            '''
                         }
                     }
                     post {
