@@ -13,11 +13,12 @@ pipeline {
     }
 
     parameters {
-    choice(name: 'DEPLOY_ENV', choices: ['none', 'staging', 'production'], description: 'Target environment to deploy')
-    booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
-    booleanParam(name: 'SKIP_SECURITY_SCANS', defaultValue: false, description: 'Skip all security scans')
-    booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: 'Skip SonarQube SAST only')
-}
+        choice(name: 'DEPLOY_ENV', choices: ['none', 'staging', 'production'], description: 'Target environment to deploy')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
+        booleanParam(name: 'SKIP_SECURITY_SCANS', defaultValue: false, description: 'Skip all security scans')
+        booleanParam(name: 'SKIP_SONARQUBE', defaultValue: false, description: 'Skip SonarQube SAST only')
+        booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: 'Skip SonarQube SAST only')
+    }
 
     // tools {
     //     maven 'Maven-3'    // Uncomment if Maven is configured in Jenkins Global Tool Config
@@ -107,9 +108,10 @@ pipeline {
         //       — finds known CVEs in third-party dependencies
         // ═══════════════════════════════════════════════════════════
         stage('SAST & SCA') {
+            when { expression { !params.SKIP_SECURITY_SCANS } }
             parallel {
                 stage('SAST - SonarQube') {
-                    when { expression { !params.SKIP_SONAR && !params.SKIP_SONARQUBE } }
+                    when { expression { !params.SKIP_SECURITY_SCANS && !params.SKIP_SONARQUBE && !params.SKIP_SONAR } }
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                             script {
@@ -144,6 +146,7 @@ pipeline {
                     }
                 }
                 stage('SCA - OWASP Dependency-Check') {
+                    when { expression { !params.SKIP_SECURITY_SCANS } }
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                             sh '''
@@ -176,7 +179,7 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Quality Gate') {
             when {
-                expression { !params.SKIP_SONAR && !params.SKIP_SONARQUBE }
+                expression { !params.SKIP_SECURITY_SCANS && !params.SKIP_SONARQUBE && !params.SKIP_SONAR }
             }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
@@ -394,10 +397,7 @@ XMLEOF
         // ═══════════════════════════════════════════════════════════
         stage('Deploy to Staging') {
             when {
-                allOf {
-                    branch 'main'
-                    expression { params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production' }
-                }
+                expression { params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production' }
             }
             steps {
                 sh """
@@ -421,10 +421,7 @@ XMLEOF
         // ═══════════════════════════════════════════════════════════
         stage('Smoke Tests') {
             when {
-                allOf {
-                    branch 'main'
-                    expression { params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production' }
-                }
+                expression { params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production' }
             }
             steps {
                 sh """
