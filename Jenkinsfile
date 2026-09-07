@@ -15,6 +15,7 @@ pipeline {
     parameters {
         choice(name: 'DEPLOY_ENV', choices: ['none', 'staging', 'production'], description: 'Target environment to deploy')
         booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
+        booleanParam(name: 'SKIP_SONARQUBE', defaultValue: false, description: 'Skip only SonarQube SAST analysis (SCA and other scans still run)')
         booleanParam(name: 'SKIP_SECURITY_SCANS', defaultValue: false, description: 'Skip all security scans')
     }
 
@@ -109,6 +110,7 @@ pipeline {
             when { expression { !params.SKIP_SECURITY_SCANS } }
             parallel {
                 stage('SAST - SonarQube') {
+                    when { expression { !params.SKIP_SONARQUBE } }
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                             script {
@@ -174,7 +176,11 @@ pipeline {
         //       code quality standards before artifacts are built.
         // ═══════════════════════════════════════════════════════════
         stage('Quality Gate') {
-            when { expression { !params.SKIP_SECURITY_SCANS } }
+            when {
+                expression {
+                    !params.SKIP_SECURITY_SCANS && !params.SKIP_SONARQUBE
+                }
+            }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     script {
@@ -538,7 +544,7 @@ XMLEOF
                     echo "╠════════════════════════════════════════════════════════════╣"
                     echo "║ SECURITY SCANS                                            ║"
                     echo "║   Secrets   : Gitleaks    (see Gitleaks Report)            "
-                    echo "║   SAST      : SonarQube   (see SonarQube Dashboard)       "
+                    echo "║   SAST      : SonarQube   (skipped if SKIP_SONARQUBE=true)"
                     echo "║   SCA       : OWASP DC    (see Dependency-Check Report)   "
                     echo "║   DAST      : OWASP ZAP   (see ZAP Report)               "
                     echo "║   Container : Trivy        (see Trivy Reports)            "
