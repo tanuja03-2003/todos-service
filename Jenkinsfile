@@ -13,11 +13,11 @@ pipeline {
     }
 
     parameters {
-        choice(name: 'DEPLOY_ENV', choices: ['none', 'staging', 'production'], description: 'Target environment to deploy')
-        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
-        booleanParam(name: 'SKIP_SONARQUBE', defaultValue: false, description: 'Skip only SonarQube SAST analysis (SCA and other scans still run)')
-        booleanParam(name: 'SKIP_SECURITY_SCANS', defaultValue: false, description: 'Skip all security scans')
-    }
+    choice(name: 'DEPLOY_ENV', choices: ['none', 'staging', 'production'], description: 'Target environment to deploy')
+    booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip test execution')
+    booleanParam(name: 'SKIP_SECURITY_SCANS', defaultValue: false, description: 'Skip all security scans')
+    booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: 'Skip SonarQube SAST only')
+}
 
     // tools {
     //     maven 'Maven-3'    // Uncomment if Maven is configured in Jenkins Global Tool Config
@@ -107,7 +107,6 @@ pipeline {
         //       — finds known CVEs in third-party dependencies
         // ═══════════════════════════════════════════════════════════
         stage('SAST & SCA') {
-            when { expression { !params.SKIP_SECURITY_SCANS } }
             parallel {
                 stage('SAST - SonarQube') {
                     when { expression { !params.SKIP_SONARQUBE } }
@@ -177,9 +176,8 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Quality Gate') {
             when {
-                expression {
-                    !params.SKIP_SECURITY_SCANS && !params.SKIP_SONARQUBE
-                }
+                expression { !params.SKIP_SONAR }
+             }
             }
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
@@ -334,7 +332,14 @@ pipeline {
         //       traceability and rollback capability.
         // ═══════════════════════════════════════════════════════════
         stage('Publish JAR to Nexus') {
-            when { branch 'main' }
+             when {
+                 allOf {
+                    branch 'main'
+                    expression {
+                    params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production'
+                    }
+                 }
+           }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
@@ -367,7 +372,14 @@ XMLEOF
         //       deployments always pull from a trusted source.
         // ═══════════════════════════════════════════════════════════
         stage('Push Docker Image to Nexus') {
-            when { branch 'main' }
+             when {
+                   allOf {
+                   branch 'main'
+                   expression {
+                       params.DEPLOY_ENV == 'staging' || params.DEPLOY_ENV == 'production'
+                     }
+                }
+         } 
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
