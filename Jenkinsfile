@@ -9,7 +9,7 @@ pipeline {
         NEXUS_DOCKER_REG = 'localhost:8083'
         SONARQUBE_URL    = 'http://localhost:8085'
         STAGING_PORT     = '9090'
-        PRODUCTION_PORT  = '8081'
+        PRODUCTION_PORT  = '8084'
     }
 
     parameters {
@@ -43,6 +43,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+                sh 'chmod +x ./mvnw'
                 sh 'echo "Branch: ${GIT_BRANCH} | Commit: ${GIT_COMMIT}"'
             }
         }
@@ -63,7 +64,7 @@ pipeline {
                     docker run --rm -v $(pwd):/repo \
                         zricethezav/gitleaks:v8.18.0 \
                         detect --source /repo \
-                        --config /repo/todos-service/security-config/gitleaks.toml \
+                        --config /repo/security-config/gitleaks.toml \
                         --report-path /repo/reports/gitleaks-report.json \
                         --report-format json \
                         --verbose
@@ -85,14 +86,12 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Build & Test') {
             steps {
-                dir('todos-service') {
-                    sh "mvn clean ${params.SKIP_TESTS ? 'compile' : 'verify'} -B"
-                }
+                sh "./mvnw clean ${params.SKIP_TESTS ? 'compile' : 'verify'} -B"
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'todos-service/target/surefire-reports/*.xml'
-                    jacoco(execPattern: 'todos-service/target/jacoco.exec')
+                    junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+                    jacoco(execPattern: 'target/jacoco.exec')
                 }
             }
         }
@@ -112,11 +111,10 @@ pipeline {
                 stage('SAST - SonarQube') {
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        dir('todos-service') {
                             withSonarQubeEnv('SonarQube') {
                                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                                     sh """
-                                        mvn sonar:sonar \
+                                        ./mvnw sonar:sonar \
                                             -Dsonar.projectKey=${IMAGE_NAME} \
                                             -Dsonar.projectName=${IMAGE_NAME} \
                                             -Dsonar.host.url=${SONARQUBE_URL} \
@@ -126,21 +124,18 @@ pipeline {
                                 }
                             }
                         }
-                        }
                     }
                 }
                 stage('SCA - OWASP Dependency-Check') {
                     steps {
                         catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                        dir('todos-service') {
-                            sh 'mvn org.owasp:dependency-check-maven:check -DdataDirectory=/opt/dependency-check-data -B'
-                        }
+                            sh './mvnw org.owasp:dependency-check-maven:check -DdataDirectory=/opt/dependency-check-data -B'
                         }
                     }
                     post {
                         always {
-                            dependencyCheckPublisher pattern: 'todos-service/target/dependency-check-report.json'
-                            archiveArtifacts artifacts: 'todos-service/target/dependency-check-report.*', allowEmptyArchive: true
+                            dependencyCheckPublisher pattern: 'target/dependency-check-report.json'
+                            archiveArtifacts artifacts: 'target/dependency-check-report.*', allowEmptyArchive: true
                         }
                     }
                 }
@@ -169,10 +164,8 @@ pipeline {
         // ═══════════════════════════════════════════════════════════
         stage('Package JAR & Build Docker Image') {
             steps {
-                
-                    sh "./mvnw clean ${params.SKIP_TESTS ? 'compile' : 'verify'} -B"
-                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest ."
-                
+                sh './mvnw package -DskipTests -B'
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest ."
             }
         }
 
@@ -190,8 +183,8 @@ pipeline {
                     steps {
                         sh '''
                             echo "=== Scanning JAR for vulnerabilities ==="
-                            echo "trivy fs --scanners vuln todos-service/target/*.jar --format json --output reports/trivy-jar-report.json"
-                            echo "trivy fs --scanners vuln todos-service/target/*.jar --format template --template @contrib/html.tpl --output reports/trivy-jar-report.html"
+                            echo "trivy fs --scanners vuln target/*.jar --format json --output reports/trivy-jar-report.json"
+                            echo "trivy fs --scanners vuln target/*.jar --format template --template @contrib/html.tpl --output reports/trivy-jar-report.html"
                             echo "JAR scan complete."
                         '''
                     }
@@ -233,7 +226,7 @@ pipeline {
                         -t http://localhost:8888 \\\\
                         -r zap-report.html \\\\
                         -J zap-report.json \\\\
-                        -c todos-service/security-config/zap-rules.tsv || true"
+                        -c security-config/zap-rules.tsv || true"
 
                     echo "=== Tearing down DAST target ==="
                     echo "docker stop ${IMAGE_NAME}-dast && docker rm ${IMAGE_NAME}-dast"
@@ -269,7 +262,7 @@ pipeline {
                     ])
                     publishHTML(target: [
                         allowMissing: true, alwaysLinkToLastBuild: true, keepAll: true,
-                        reportDir: 'todos-service/target', reportFiles: 'dependency-check-report.html',
+                        reportDir: 'target', reportFiles: 'dependency-check-report.html',
                         reportName: 'OWASP Dependency-Check Report'
                     ])
                     publishHTML(target: [
@@ -300,12 +293,11 @@ pipeline {
         stage('Publish JAR to Nexus') {
             when { branch 'main' }
             steps {
-                dir('todos-service') {
-                    withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh """
-                            SETTINGS=\$(mktemp)
-                            chmod 600 \$SETTINGS
-                            cat > \$SETTINGS <<XMLEOF
+                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        SETTINGS=\$(mktemp)
+                        chmod 600 \$SETTINGS
+                        cat > \$SETTINGS <<XMLEOF
 <settings>
   <servers>
     <server>
@@ -316,13 +308,12 @@ pipeline {
   </servers>
 </settings>
 XMLEOF
-                            mvn deploy \
-                                -DskipTests \
-                                -DaltDeploymentRepository=nexus-releases::default::${NEXUS_URL}/repository/${NEXUS_REPO}/ \
-                                -s \$SETTINGS -B
-                            rm -f \$SETTINGS
-                        """
-                    }
+                        ./mvnw deploy \
+                            -DskipTests \
+                            -DaltDeploymentRepository=nexus-releases::default::${NEXUS_URL}/repository/${NEXUS_REPO}/ \
+                            -s \$SETTINGS -B
+                        rm -f \$SETTINGS
+                    """
                 }
             }
         }
@@ -543,12 +534,24 @@ XMLEOF
             cleanWs()
         }
         success {
-            slackSend(channel: '#builds', color: 'good',
-                message: "SUCCESS: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+            script {
+                try {
+                    slackSend(channel: '#builds', color: 'good',
+                        message: "SUCCESS: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+                } catch (Throwable t) {
+                    echo "Slack notification skipped: ${t.message}"
+                }
+            }
         }
         failure {
-            slackSend(channel: '#builds', color: 'danger',
-                message: "FAILED: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+            script {
+                try {
+                    slackSend(channel: '#builds', color: 'danger',
+                        message: "FAILED: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+                } catch (Throwable t) {
+                    echo "Slack notification skipped: ${t.message}"
+                }
+            }
             emailext(
                 subject: "FAILED: ${IMAGE_NAME} Build #${BUILD_NUMBER}",
                 body: "Build failed. Check: ${BUILD_URL}",
@@ -556,8 +559,14 @@ XMLEOF
             )
         }
         unstable {
-            slackSend(channel: '#builds', color: 'warning',
-                message: "UNSTABLE: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+            script {
+                try {
+                    slackSend(channel: '#builds', color: 'warning',
+                        message: "UNSTABLE: ${IMAGE_NAME}:${IMAGE_TAG} - ${BUILD_URL}")
+                } catch (Throwable t) {
+                    echo "Slack notification skipped: ${t.message}"
+                }
+            }
         }
     }
 }
